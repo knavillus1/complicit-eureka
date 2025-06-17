@@ -34,6 +34,23 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Function to run command with timeout (with fallback for systems without timeout)
+run_with_timeout() {
+    local timeout_duration="$1"
+    shift
+    
+    if command_exists timeout; then
+        timeout "$timeout_duration" "$@"
+    elif command_exists gtimeout; then
+        # macOS with coreutils installed via brew
+        gtimeout "$timeout_duration" "$@"
+    else
+        # Fallback: run without timeout
+        log_warning "timeout command not available, running without timeout"
+        "$@"
+    fi
+}
+
 # Function to check Node.js version
 check_node_version() {
     if ! command_exists node; then
@@ -71,9 +88,15 @@ install_package_manager() {
     fi
     
     if ! command_exists pnpm; then
-        log_info "Installing pnpm globally..."
-        npm install -g pnpm
-        log_success "pnpm installed successfully"
+        log_info "pnpm not found, attempting to install..."
+        if npm install -g pnpm 2>/dev/null; then
+            log_success "pnpm installed successfully"
+        else
+            log_warning "Failed to install pnpm globally (permission denied). Will use npm instead."
+            log_info "If you want to use pnpm, install it manually: npm install -g pnpm (with sudo if needed)"
+        fi
+    else
+        log_success "pnpm is already available"
     fi
 }
 
@@ -137,9 +160,25 @@ install_wrangler() {
         log_info "Installing Wrangler..."
     fi
     
-    # Install the correct wrangler package (not @cloudflare/wrangler)
-    npm install -g wrangler
-    log_success "Wrangler installed successfully"
+    # Install the correct wrangler package with timeout and non-interactive flags
+    log_info "Installing wrangler globally (this may take a moment)..."
+    if run_with_timeout 300 npm install -g wrangler --silent --no-audit --no-fund 2>/dev/null; then
+        log_success "Wrangler installed successfully"
+    else
+        log_warning "Failed to install Wrangler globally (permission denied or network issue)"
+        log_info "Trying local installation as fallback..."
+        
+        # Try installing locally in the project directory
+        mkdir -p ./node_modules/.bin 2>/dev/null || true
+        if npm install wrangler --silent --no-audit --no-fund 2>/dev/null; then
+            log_success "Wrangler installed locally"
+            # Add local node_modules/.bin to PATH for this session
+            export PATH="$(pwd)/node_modules/.bin:$PATH"
+        else
+            log_error "Failed to install Wrangler. Some features may not work."
+            log_info "You can install it manually later with: npm install -g wrangler"
+        fi
+    fi
 }
 
 # Function to create RedwoodSDK project
@@ -152,8 +191,17 @@ create_project() {
         log_info "Removed existing directory"
     fi
     
-    # Create the project non-interactively
-    npx create-rwsdk "$PROJECT_NAME" --yes 2>/dev/null || npx create-rwsdk "$PROJECT_NAME"
+    # Create the project non-interactively with timeout and auto-confirmation
+    log_info "Installing create-rwsdk and creating project..."
+    run_with_timeout 300 npx -y create-rwsdk "$PROJECT_NAME" || {
+        log_warning "npx command timed out or failed, trying alternative approach..."
+        # Try installing create-rwsdk globally first
+        npm install -g create-rwsdk --silent
+        create-rwsdk "$PROJECT_NAME" || {
+            log_error "Failed to create RedwoodSDK project"
+            exit 1
+        }
+    }
     
     if [ ! -d "$WORKSPACE_DIR" ]; then
         log_error "Failed to create project directory"
@@ -172,21 +220,41 @@ setup_project() {
     local package_manager
     package_manager=$(get_package_manager)
     
-    # Install dependencies
-    log_info "Installing dependencies with $package_manager..."
+    # Install dependencies with timeout
+    log_info "Installing dependencies with $package_manager (this may take a few minutes)..."
     if [ "$package_manager" = "pnpm" ]; then
-        pnpm install --silent
+        run_with_timeout 600 pnpm install --silent || {
+            log_warning "pnpm install failed, trying npm..."
+            run_with_timeout 600 npm install --silent --no-audit --no-fund || {
+                log_error "Failed to install dependencies"
+                exit 1
+            }
+        }
     else
-        npm install --silent
+        run_with_timeout 600 npm install --silent --no-audit --no-fund || {
+            log_error "Failed to install dependencies"
+            exit 1
+        }
     fi
     
     log_success "Dependencies installed successfully"
     
-    # Generate types
+    # Generate types with timeout
     log_info "Generating TypeScript types..."
-    wrangler types 2>/dev/null || {
-        log_warning "Type generation failed - will retry after Cloudflare auth"
-    }
+    if command_exists wrangler; then
+        # Check if authenticated before running wrangler types
+        if wrangler whoami 2>/dev/null | grep -q "You are logged in"; then
+            run_with_timeout 60 wrangler types 2>/dev/null || {
+                log_warning "Type generation failed - this is normal for new projects"
+            }
+        else
+            log_warning "Cloudflare authentication required for type generation"
+            log_info "Skipping type generation - can be done later with: wrangler types"
+        fi
+    else
+        log_warning "Wrangler not available - skipping type generation"
+        log_info "Install Wrangler and run: wrangler types"
+    fi
     
     # Setup testing infrastructure for coding agent
     setup_testing_environment
@@ -206,7 +274,7 @@ setup_testing_environment() {
     if [ "$package_manager" = "pnpm" ]; then
         pnpm add -D @types/node vitest @vitest/ui miniflare --silent 2>/dev/null || true
     else
-        npm install -D @types/node vitest @vitest/ui miniflare --silent 2>/dev/null || true
+        npm install -D @types/node vitest @vitest/ui miniflare --silent --no-audit --no-fund 2>/dev/null || true
     fi
     
     # Create a basic test file to verify setup
@@ -348,6 +416,12 @@ show_next_steps() {
     echo "  $package_manager test                   # Run tests"
     echo "  ./scripts/test.sh                # Alternative test runner"
     echo ""
+    echo "☁️  Cloudflare Setup (optional for full features):"
+    echo "  wrangler login                   # Authenticate with Cloudflare"
+    echo "  wrangler d1 create ${PROJECT_NAME}-db    # Create D1 database"
+    echo "  wrangler r2 bucket create ${PROJECT_NAME}-storage # Create R2 bucket"
+    echo "  wrangler types                   # Generate types"
+    echo ""
     echo "🔧 Development URLs:"
     echo "  • App: http://localhost:5173"
     echo "  • Test UI: http://localhost:51204 (when running test:ui)"
@@ -368,21 +442,26 @@ show_next_steps() {
     echo "🚀 Deployment:"
     echo "  • npm run release         # Build and deploy to Cloudflare"
     echo ""
+    echo "🔐 Alternative Cloudflare Authentication:"
+    echo "  # Set API token (no browser required):"
+    echo "  export CLOUDFLARE_API_TOKEN=your_token_here"
+    echo "  # Get token from: https://dash.cloudflare.com/profile/api-tokens"
+    echo ""
     echo "Environment is ready for autonomous coding agent development!"
     echo ""
 }
 
 # Function to run optional integrations
 setup_optional_integrations() {
-    log_info "Setting up default integrations for coding agent environment..."
+    log_info "Setting up development environment integrations..."
     
-    # Automatically setup D1 database for a complete development environment
+    # Setup Prisma for database development (without requiring Cloudflare auth)
     setup_d1_database
     
-    # Automatically setup R2 bucket for a complete development environment  
+    # Setup R2 configuration (without requiring Cloudflare auth)
     setup_r2_bucket
     
-    log_success "Default integrations configured"
+    log_success "Development integrations configured"
 }
 
 # Function to setup D1 database
@@ -394,11 +473,24 @@ setup_d1_database() {
     local db_name="${PROJECT_NAME}-db"
     
     # Create D1 database
-    log_info "Creating D1 database: $db_name"
-    wrangler d1 create "$db_name" 2>/dev/null || {
-        log_warning "D1 database creation failed or already exists"
-        return 0
-    }
+    log_info "Preparing D1 database configuration: $db_name"
+    if command_exists wrangler; then
+        # Check if already authenticated
+        if wrangler whoami 2>/dev/null | grep -q "You are logged in"; then
+            log_info "Already authenticated with Cloudflare"
+            wrangler d1 create "$db_name" 2>/dev/null || {
+                log_warning "D1 database creation failed or already exists"
+            }
+        else
+            log_warning "Cloudflare authentication required for D1 database creation"
+            log_info "Skipping D1 database creation - can be done later with:"
+            log_info "  1. wrangler login"
+            log_info "  2. wrangler d1 create $db_name"
+        fi
+    else
+        log_warning "Wrangler not available - skipping D1 database creation"
+        log_info "Install Wrangler and run: wrangler d1 create $db_name"
+    fi
     
     # Install Prisma
     local package_manager
@@ -423,13 +515,26 @@ setup_r2_bucket() {
     local bucket_name="${PROJECT_NAME}-storage"
     
     # Create R2 bucket
-    log_info "Creating R2 bucket: $bucket_name"
-    wrangler r2 bucket create "$bucket_name" 2>/dev/null || {
-        log_warning "R2 bucket creation failed or already exists"
-        return 0
-    }
+    log_info "Preparing R2 bucket configuration: $bucket_name"
+    if command_exists wrangler; then
+        # Check if already authenticated
+        if wrangler whoami 2>/dev/null | grep -q "You are logged in"; then
+            log_info "Already authenticated with Cloudflare"
+            wrangler r2 bucket create "$bucket_name" 2>/dev/null || {
+                log_warning "R2 bucket creation failed or already exists"
+            }
+        else
+            log_warning "Cloudflare authentication required for R2 bucket creation"
+            log_info "Skipping R2 bucket creation - can be done later with:"
+            log_info "  1. wrangler login"
+            log_info "  2. wrangler r2 bucket create $bucket_name"
+        fi
+    else
+        log_warning "Wrangler not available - skipping R2 bucket creation"
+        log_info "Install Wrangler and run: wrangler r2 bucket create $bucket_name"
+    fi
     
-    log_success "R2 bucket created"
+    log_success "R2 bucket setup completed"
 }
 
 # Main execution
