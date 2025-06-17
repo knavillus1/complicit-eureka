@@ -8,6 +8,9 @@ Do NOT attempt to run any command which requires open network communication.  Yo
 
 ## Development Instructions
 You are to only develop for the Redwood SDK, Refer to `REDWOOD_SDK.INSTRUCTIONS.md` for details.
+
+Your environment has been setup with `install.sh`.  Please review this script to understand your environment.
+
 • Always prefer RedwoodSDK helpers over bespoke code.
 • Keep all server‑side logic inside src/worker.tsx routes or server functions.
 • Co‑locate UI and server functions per feature directory.
