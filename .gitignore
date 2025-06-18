@@ -304,6 +304,10 @@ temp/
 # ===========================================
 
 # Generated sandbox projects (created by install.sh)
+# Note: We allow rwsdk-sandbox/ to be versioned for development work
+# The sandbox has its own .gitignore to exclude node_modules, build files, etc.
+# rwsdk-sandbox/
+# Generated sandbox projects (example code only - not for modification)
 rwsdk-sandbox/
 *-sandbox/
 

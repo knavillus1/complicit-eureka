@@ -1,16 +1,36 @@
 # RedwoodSDK Coding Agent Sandbox Setup
 
-This repository contains an automated setup script for creating isolated RedwoodSDK development environments, specifically designed for coding agents and automated workflows.
+This repository provides an automated setup for demonstrating RedwoodSDK capabilities with Codex agent development. It creates isolated development environments specifically designed for coding agents and automated workflows.
 
 ## Quick Start
 
+**Prerequisites:** 
+- Create a Cloudflare API token (see setup below) OR use `SKIP_CLOUDFLARE=true` for local-only development
+
 ```bash
-# Make script executable and run
+# Option 1: Full setup with Cloudflare integration
+# First create an API token at: https://dash.cloudflare.com/profile/api-tokens
+# Use the "Edit Cloudflare Workers" template
 chmod +x install.sh
 ./install.sh [project-name]
+
+# Option 2: Local development only (cloud/CI environments)
+SKIP_CLOUDFLARE=true ./install.sh [project-name]
 ```
 
-The script will create a complete RedwoodSDK development environment without requiring any user interaction.
+The script creates a complete RedwoodSDK environment for **demonstrating modern full-stack development with Codex agent workflows**.
+
+## 📖 For Coding Agents: Example Code Reference
+
+**The installed `rwsdk-sandbox/` directory serves as READ-ONLY example code for learning RedwoodSDK patterns.**
+
+### Agent Guidelines:
+- ✅ **Study the structure**: Review file organization, routing patterns, and configuration
+- ✅ **Reference the code**: Use as examples for understanding RedwoodSDK concepts
+- ❌ **Never modify**: The sandbox is excluded from git and should not be edited
+- ❌ **Never execute**: Don't run commands or dev servers in the sandbox
+
+**Always create fresh projects with `npx create-rwsdk your-project-name` for actual development.**
 
 ## 🌲 What Gets Installed
 
@@ -32,18 +52,24 @@ For full functionality (D1 databases, R2 storage, deployments), you'll need a Cl
 
 ### Step 2: Configure Token Permissions
 
-The "Edit Cloudflare Workers" template includes:
+**Recommended Approach:**
+1. **Select "Edit Cloudflare Workers" template** ✅
+2. **Account**: Select your Cloudflare account  
+3. **Zone Resources**: Choose "All zones"
+4. **Create the token**
+
+This template includes all necessary permissions:
 - ✅ **Workers Scripts** - Deploy and manage your apps
 - ✅ **D1 Database** - Create and manage SQLite databases
 - ✅ **R2 Object Storage** - File and image storage
-- ✅ **KV Storage** - Key-value storage
-- ✅ **Queues** - Background job processing
+- ✅ **Account Access** - Required for API operations
 
-**Configuration:**
-- **Account**: Select your Cloudflare account
-- **Zone Resources**: Choose "All zones" or specific zones
-- **Client IP Address Filtering**: Leave blank for maximum flexibility
-- **TTL**: Default (recommended) or custom expiration
+**For Cloud/Automated Environments (Alternative):**
+```bash
+# Skip Cloudflare setup entirely if you encounter issues
+export SKIP_CLOUDFLARE=true
+./install.sh
+```
 
 ### Step 3: Export Token
 
@@ -66,7 +92,48 @@ wrangler whoami
 
 # Should output something like:
 # You are logged in with an API Token, associated with the email 'your@email.com'!
+
+# Test actual API access
+wrangler d1 list
+
+# Should list databases or show empty list (no authentication errors)
 ```
+
+### 🔧 Troubleshooting Authentication
+
+**✅ Good News: "Edit Cloudflare Workers" template works!**
+
+If you still see **"Unable to authenticate request [code: 10001]"**:
+
+#### **Option 1: Verify Token is Set**
+```bash
+# Check if token exists
+echo $CLOUDFLARE_API_TOKEN
+
+# If empty, set it:
+export CLOUDFLARE_API_TOKEN=your_actual_token_here
+```
+
+#### **Option 2: Test Token Manually**
+```bash
+# Test authentication
+wrangler whoami
+
+# Should show: "You are logged in with an API Token, associated with..."
+```
+
+#### **Option 3: Skip Cloudflare Setup (Recommended for Cloud Environments)**
+```bash
+# For coding agents and automated environments
+export SKIP_CLOUDFLARE=true
+./install.sh
+
+# This creates a fully functional RedwoodSDK project for local development
+# You can add Cloudflare features later when needed
+```
+
+#### **Note on Proxy Environments**
+If you see "Proxy environment variables detected", the authentication issues might be related to network restrictions in your cloud environment. The `SKIP_CLOUDFLARE=true` option bypasses these entirely.
 
 ## 🚀 Post-Setup Commands
 
@@ -125,6 +192,28 @@ npm run test:ui        # Visual dashboard at http://localhost:51204
 ./scripts/test.sh      # Simple test runner
 ./scripts/dev.sh       # Development server
 ./scripts/build.sh     # Production build
+```
+
+## 📝 Version Control for Development
+
+The sandbox project is configured for version control and development:
+
+- **Source control ready**: The `rwsdk-sandbox/` directory can be committed to git
+- **Proper .gitignore**: Dependencies and build artifacts are excluded automatically
+- **Development files included**: Source code, configuration, and project files are tracked
+- **Environment safety**: Sensitive files like `.env` and API tokens are excluded
+
+```bash
+# The rwsdk-sandbox project can be committed normally
+cd rwsdk-sandbox
+git add .
+git commit -m "Add new feature or development work"
+
+# Dependencies and build files are automatically excluded:
+# - node_modules/
+# - dist/
+# - .env files
+# - build artifacts
 ```
 
 ## 🔧 Environment Variables

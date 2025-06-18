@@ -1,4 +1,42 @@
-**TL;DR — RedwoodSDK gives an LLM‑powered coding agent an ergonomic, zero‑magic path to build full‑stack, Cloudflare‑native React apps.
+**TL;DR — RedwoodSDK gives an LLM‑powered coding agent an ergonomic, zero‑magic path to build full‑stack, Cloudflare‑native React apps.
+Start with `npx create‑rwsdk`, treat `src/worker.tsx` as the single entry point, co‑locate UI and server code, bind Cloudflare services (D1, R2, Durable Objects, Queues) in `wrangler.jsonc`, and deploy in one step with `npm run release`.**([docs.rwsdk.com][1], [docs.rwsdk.com][2])
+
+---
+
+## 🔍 IMPORTANT: Example Code Reference
+
+**A complete RedwoodSDK example project is available at `./rwsdk-sandbox/` for reference ONLY.**
+
+### ⚠️ Critical Agent Instructions:
+
+1. **READ-ONLY REFERENCE**: The `rwsdk-sandbox/` directory contains example code to learn RedwoodSDK patterns
+2. **DO NOT MODIFY**: Never edit, run, or execute anything in the sandbox directory
+3. **DO NOT RUN COMMANDS**: Never run npm/pnpm/wrangler commands inside rwsdk-sandbox/
+4. **STUDY THE PATTERNS**: Use it to understand:
+   - File structure (`src/worker.tsx`, `src/app/`, etc.)
+   - Configuration patterns (`wrangler.jsonc`, `package.json`)
+   - Code examples (components, routing, middleware)
+   - Testing setup (`src/__tests__/`)
+
+### 📖 How to Use the Example:
+
+```bash
+# ✅ CORRECT: Create your own new project
+npx create-rwsdk my-actual-project
+cd my-actual-project
+
+# ✅ CORRECT: Reference the example structure
+ls ../rwsdk-sandbox/src/          # Study the file organization
+cat ../rwsdk-sandbox/src/worker.tsx # Learn routing patterns
+
+# ❌ WRONG: Never work in the sandbox
+cd rwsdk-sandbox                  # DON'T DO THIS
+npm run dev                       # DON'T DO THIS
+```
+
+**The sandbox is for learning, not development. Always create fresh projects with `npx create-rwsdk`.**
+
+---;DR — RedwoodSDK gives an LLM‑powered coding agent an ergonomic, zero‑magic path to build full‑stack, Cloudflare‑native React apps.
 Start with `npx create‑rwsdk`, treat `src/worker.tsx` as the single entry point, co‑locate UI and server code, bind Cloudflare services (D1, R2, Durable Objects, Queues) in `wrangler.jsonc`, and deploy in one step with `npm run release`.**([docs.rwsdk.com][1], [docs.rwsdk.com][2])
 
 ---

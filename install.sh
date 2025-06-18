@@ -241,19 +241,15 @@ setup_project() {
     
     # Generate types with timeout
     log_info "Generating TypeScript types..."
-    if command_exists wrangler; then
-        # Check if authenticated before running wrangler types
-        if wrangler whoami 2>/dev/null | grep -q "You are logged in"; then
-            run_with_timeout 60 wrangler types 2>/dev/null || {
-                log_warning "Type generation failed - this is normal for new projects"
-            }
-        else
-            log_warning "Cloudflare authentication required for type generation"
-            log_info "Skipping type generation - can be done later with: wrangler types"
-        fi
+    if command_exists wrangler && [ "${SKIP_CLOUDFLARE:-}" != "true" ]; then
+        safe_wrangler_command "TypeScript type generation" "wrangler types"
     else
-        log_warning "Wrangler not available - skipping type generation"
-        log_info "Install Wrangler and run: wrangler types"
+        if [ "${SKIP_CLOUDFLARE:-}" = "true" ]; then
+            log_info "Skipping type generation (SKIP_CLOUDFLARE=true)"
+        else
+            log_warning "Wrangler not available - skipping type generation"
+        fi
+        log_info "Project will use basic TypeScript types for local development"
     fi
     
     # Setup testing infrastructure for coding agent
@@ -453,6 +449,18 @@ show_next_steps() {
 
 # Function to run optional integrations
 setup_optional_integrations() {
+    # Check if we should skip Cloudflare setup entirely
+    if [ "${SKIP_CLOUDFLARE:-}" = "true" ]; then
+        log_info "Skipping Cloudflare integrations (auto-detected or manually set)"
+        log_info "Core RedwoodSDK project is fully functional for local development"
+        log_info "To enable Cloudflare features later:"
+        log_info "  1. Set CLOUDFLARE_API_TOKEN environment variable"
+        log_info "  2. Run: wrangler d1 create ${PROJECT_NAME}-db"
+        log_info "  3. Run: wrangler r2 bucket create ${PROJECT_NAME}-storage"
+        log_info "  4. Run: wrangler types"
+        return 0
+    fi
+    
     log_info "Setting up development environment integrations..."
     
     # Setup Prisma for database development (without requiring Cloudflare auth)
@@ -473,23 +481,15 @@ setup_d1_database() {
     local db_name="${PROJECT_NAME}-db"
     
     # Create D1 database
-    log_info "Preparing D1 database configuration: $db_name"
-    if command_exists wrangler; then
-        # Check if already authenticated
-        if wrangler whoami 2>/dev/null | grep -q "You are logged in"; then
-            log_info "Already authenticated with Cloudflare"
-            wrangler d1 create "$db_name" 2>/dev/null || {
-                log_warning "D1 database creation failed or already exists"
-            }
-        else
-            log_warning "Cloudflare authentication required for D1 database creation"
-            log_info "Skipping D1 database creation - can be done later with:"
-            log_info "  1. wrangler login"
-            log_info "  2. wrangler d1 create $db_name"
-        fi
+    if command_exists wrangler && [ "${SKIP_CLOUDFLARE:-}" != "true" ]; then
+        safe_wrangler_command "D1 database creation ($db_name)" "wrangler d1 create $db_name"
     else
-        log_warning "Wrangler not available - skipping D1 database creation"
-        log_info "Install Wrangler and run: wrangler d1 create $db_name"
+        if [ "${SKIP_CLOUDFLARE:-}" = "true" ]; then
+            log_info "Skipping D1 database creation (SKIP_CLOUDFLARE=true)"
+        else
+            log_warning "Wrangler not available - skipping D1 database creation"
+        fi
+        log_info "For local development, you can use SQLite directly"
     fi
     
     # Install Prisma
@@ -515,26 +515,105 @@ setup_r2_bucket() {
     local bucket_name="${PROJECT_NAME}-storage"
     
     # Create R2 bucket
-    log_info "Preparing R2 bucket configuration: $bucket_name"
-    if command_exists wrangler; then
-        # Check if already authenticated
-        if wrangler whoami 2>/dev/null | grep -q "You are logged in"; then
-            log_info "Already authenticated with Cloudflare"
-            wrangler r2 bucket create "$bucket_name" 2>/dev/null || {
-                log_warning "R2 bucket creation failed or already exists"
-            }
-        else
-            log_warning "Cloudflare authentication required for R2 bucket creation"
-            log_info "Skipping R2 bucket creation - can be done later with:"
-            log_info "  1. wrangler login"
-            log_info "  2. wrangler r2 bucket create $bucket_name"
-        fi
+    if command_exists wrangler && [ "${SKIP_CLOUDFLARE:-}" != "true" ]; then
+        safe_wrangler_command "R2 bucket creation ($bucket_name)" "wrangler r2 bucket create $bucket_name"
     else
-        log_warning "Wrangler not available - skipping R2 bucket creation"
-        log_info "Install Wrangler and run: wrangler r2 bucket create $bucket_name"
+        if [ "${SKIP_CLOUDFLARE:-}" = "true" ]; then
+            log_info "Skipping R2 bucket creation (SKIP_CLOUDFLARE=true)"
+        else
+            log_warning "Wrangler not available - skipping R2 bucket creation"
+        fi
+        log_info "For local development, you can use local file storage"
     fi
     
     log_success "R2 bucket setup completed"
+}
+
+# Function to check if Wrangler is authenticated
+is_wrangler_authenticated() {
+    if ! command_exists wrangler; then
+        return 1
+    fi
+    
+    # Try a simple API call that requires authentication
+    local auth_output
+    auth_output=$(wrangler whoami 2>&1)
+    
+    # First check for obvious authentication failures
+    if echo "$auth_output" | grep -q -E "(Unable to authenticate|Not logged in|API token|login required|10001)"; then
+        return 1
+    fi
+    
+    # Check for success patterns in whoami
+    if ! echo "$auth_output" | grep -q -E "(You are logged in|associated with the email)"; then
+        return 1
+    fi
+    
+    # Now do a more thorough check - try to list something that requires API access
+    # This will catch cases where whoami works but API calls fail
+    local api_test_output
+    api_test_output=$(wrangler r2 bucket list 2>&1 || true)
+    
+    # If we get authentication errors from the actual API call, we're not properly authenticated
+    if echo "$api_test_output" | grep -q -E "(Unable to authenticate|10001|Authentication failed|API token)"; then
+        return 1
+    fi
+    
+    # If we get here, authentication seems to be working
+    return 0
+}
+
+# Function to safely run wrangler commands with proper error handling
+safe_wrangler_command() {
+    local command_description="$1"
+    shift
+    local wrangler_cmd="$@"
+    
+    log_info "Attempting: $command_description"
+    
+    local output
+    if output=$(eval "$wrangler_cmd" 2>&1); then
+        log_success "$command_description completed successfully"
+        return 0
+    else
+        # Check if it's an authentication error
+        if echo "$output" | grep -q -E "(Unable to authenticate|10001|Authentication failed|API token)"; then
+            log_warning "$command_description failed: Authentication required"
+            log_info "Solutions:"
+            log_info "  1. Set API token: export CLOUDFLARE_API_TOKEN=your_token"
+            log_info "  2. Or login via browser: wrangler login"
+            log_info "  3. Verify token has Workers, D1, and R2 permissions"
+            log_info "  4. See README.md for detailed troubleshooting"
+        else
+            log_warning "$command_description failed or resource already exists"
+        fi
+        return 1
+    fi
+}
+
+# Function to detect if running in a cloud/automated environment
+is_cloud_environment() {
+    # Check for common cloud environment indicators
+    if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${GITLAB_CI:-}" ] || [ -n "${JENKINS_URL:-}" ]; then
+        return 0
+    fi
+    
+    # Check for proxy environment variables (common in cloud environments)
+    if [ -n "${HTTP_PROXY:-}" ] || [ -n "${HTTPS_PROXY:-}" ] || [ -n "${http_proxy:-}" ] || [ -n "${https_proxy:-}" ]; then
+        return 0
+    fi
+    
+    # Check for container environments
+    if [ -f "/.dockerenv" ] || [ -n "${KUBERNETES_SERVICE_HOST:-}" ]; then
+        return 0
+    fi
+    
+    # Check for workspace paths (common in cloud IDEs)
+    if echo "$(pwd)" | grep -q "/workspace"; then
+        return 0
+    fi
+    
+    return 1
 }
 
 # Main execution
@@ -543,6 +622,20 @@ main() {
     echo "========================================"
     echo ""
     echo "Setting up isolated sandbox environment for coding agent..."
+    echo ""
+    
+    # Auto-detect cloud environments and skip Cloudflare setup
+    if [ "${SKIP_CLOUDFLARE:-}" != "true" ] && is_cloud_environment; then
+        export SKIP_CLOUDFLARE=true
+        echo "🌐 Cloud environment detected - automatically skipping Cloudflare setup"
+        echo "   (Set SKIP_CLOUDFLARE=false to override this behavior)"
+    fi
+    
+    if [ "${SKIP_CLOUDFLARE:-}" = "true" ]; then
+        echo "⚡ Cloudflare setup disabled - focusing on core development environment"
+    else
+        echo "💡 To skip Cloudflare setup: export SKIP_CLOUDFLARE=true"
+    fi
     echo ""
     
     check_prerequisites
